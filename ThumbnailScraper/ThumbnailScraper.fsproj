@@ -1,20 +1,23 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net6.0</TargetFramework>
-  </PropertyGroup>
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net6.0</TargetFramework>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <Content Include="google-api-key.txt">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Compile Include="Program.fs" />
-  </ItemGroup>
+	<ItemGroup>
+		<Content Include="google-api-key.txt">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</Content>
+		<Compile Include="Program.fs" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Google.Apis" Version="1.55.0" />
-    <PackageReference Include="Google.Apis.YouTube.v3" Version="1.55.0.2449" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Argu" Version="6.1.1" />
+		<PackageReference Include="FSharp.Control.AsyncSeq" Version="3.2.1" />
+		<PackageReference Include="FSharp.Control.Reactive" Version="5.0.2" />
+		<PackageReference Include="Google.Apis" Version="1.55.0" />
+		<PackageReference Include="Google.Apis.YouTube.v3" Version="1.55.0.2449" />
+	</ItemGroup>
 
 </Project>
