@@ -8,7 +8,6 @@ open FSharp.Control
 open Argu
 
 let apiKey = File.ReadAllText("./google-api-key.txt")
-let saveLocation = @"C:\Users\timma\Desktop\ImageData\ColorThumbnails\";
 
 type CommandArguments = 
         |[<Mandatory>] Save_Path of path:string
@@ -24,23 +23,37 @@ type CommandArguments =
 
 type VideoData = {Title:string; Url:string; Upload: DateTime option}
 
-let getFileExtension url = 
-    let uri = url  |> Uri
-    uri.GetLeftPart(UriPartial.Path) |> Path.GetExtension
+module ImageDownloading = 
+    let getFileExtension url = 
+        let uri = url  |> Uri
+        uri.GetLeftPart(UriPartial.Path) |> Path.GetExtension
+    
+    let createPath folder title url = 
+        let fileName = Regex.Replace(title, @"[\\/:*?""<>|]", "")
+        let fileExtension = getFileExtension url
+    
+        Path.Combine(folder, $"{fileName}{fileExtension}")
+    
+    let downloadImage data folder (client:HttpClient) = 
+        async {
+            let path = createPath folder data.Title data.Url
+    
+            let! imageBytes = client.GetByteArrayAsync(data.Url) |> Async.AwaitTask
+            do! File.WriteAllBytesAsync(path, imageBytes) |> Async.AwaitTask
+            return (data, path)
+        }
+    
+    let downloadAllImages (images: AsyncSeq<VideoData>) folderPath = 
+        Directory.CreateDirectory(folderPath) |> ignore
+        let client = new HttpClient()
+    
+        //let! a = images |> AsyncSeq.mapAsyncParallel (fun x -> return x)
+        images |> AsyncSeq.mapAsyncParallel (fun x -> downloadImage x folderPath client)
 
-let createPath folder title url = 
-    let fileName = Regex.Replace(title, @"[\\/:*?""<>|]", "")
-    let fileExtension = getFileExtension url
-
-    Path.Combine(folder, $"{fileName}{fileExtension}")
-
-let downloadImage title url folder (client:HttpClient) = 
-    async {
-        let path = createPath folder title url
-
-        let! imageBytes = client.GetByteArrayAsync(url) |> Async.AwaitTask
-        return! File.WriteAllBytesAsync(path, imageBytes) |> Async.AwaitTask
-    }
+        //let! a = images |> AsyncSeq.mapAsyncParallel (fun x -> downloadImage x.Title x.Url folderPath client )
+        //do! images |> AsyncSeq.toObservable |> Observable.bind Observable.toAs |> Observable.iter (fun x -> printfn "%A" x; downloadImage x.Title x.Url folderPath client)
+        //do! images |> AsyncSeq.iterAsyncParallel (fun x -> printfn "%A" x; downloadImage x.Title x.Url folderPath client)
+        
 
 let playlistItemToVideoData (item:Data.PlaylistItem ) =
     let nullUpload = item.Snippet.PublishedAt
@@ -59,8 +72,6 @@ let rec getVideoPage (service:YouTubeService) playlistId pageToken =
             request.MaxResults <- 50L
 
             let! response = request.ExecuteAsync() |> Async.AwaitTask
-
-            printfn "Retrieved %d items from id: %s with token %s" response.Items.Count playlistId pageToken
 
             let pageData = response.Items :> seq<_> 
             let nextToken= response.NextPageToken
@@ -83,14 +94,6 @@ let getAllVideoPages service playlistId =
 
     loop ""
 
-let downloadAllImages (images: AsyncSeq<VideoData>) folderPath = 
-    async {
-        let client = new HttpClient()
-        Directory.CreateDirectory(folderPath) |> ignore
-
-        do! images |> AsyncSeq.iterAsyncParallel (fun x -> printfn "%A" x; downloadImage x.Title x.Url folderPath client)
-    }
-
 let getChannelUploadsPlaylistId (service:YouTubeService) channelName = async{
     let mutable channelsListRequest:ChannelsResource.ListRequest = service.Channels.List("contentDetails")
     channelsListRequest.ForUsername <- channelName;
@@ -108,140 +111,108 @@ let getChannelUploads channelName = asyncSeq {
     let service = new YouTubeService(baseClient)
 
     let! playlistId = getChannelUploadsPlaylistId service channelName
-    printfn "Retrieved id: %s for channel: %s" playlistId channelName
-
-    //let! pages = getAllVideoPages service playlistId |> AsyncSeq.take 60 |> AsyncSeq.map playlistItemToVideoData |> AsyncSeq.iter (printfn "%A") 
-    //return pages
 
     yield! getAllVideoPages service playlistId
 }
 
-let predi vid = 
-    match vid.Upload with
-    | Some value -> value > DateTime.Parse "12/1/2019 8:30:52 AM";
-    | _-> false
+module StackCounterMailbox= 
+    type StackProcessorMessage<'T> = Send of 'T | Get of AsyncReplyChannel<'T option * int>
 
-let randomwait time=
-       async{
-           Console.WriteLine( $"started waiting :{time}")
-           do! Async.Sleep(time*1000);
-           Console.WriteLine( $"Waited:{time}")
-           return time
-       }
-
-let stream=
-    asyncSeq { 
-
-        for waitTime = 10 to 13 do
-            yield randomwait waitTime
-        for waitTime = 5 downto 3 do
-            yield randomwait waitTime
-        Console.WriteLine( $"Now printing second values")
-    }
-// Increment or decrement by one.
-type CounterMessage =
-    | Increment
-    | Decrement
-
-let createProcessor initialState =
-    MailboxProcessor<CounterMessage>.Start(fun inbox ->
-        // You can represent the processor's internal mutable state
-        // as an immutable parameter to the inner loop function
-        let rec innerLoop state = async {
-            printfn "Waiting for message, the current state is: %i" state
-            let! message = inbox.Receive()
-            // In each call you use the current state to produce a new
-            // value, which will be passed to the next call, so that
-            // next message sees only the new value as its local state
-            match message with
-            | Increment ->
-                let state' = state + 1
-                printfn "Counter incremented, the new state is: %i" state'
-                return! innerLoop state'
-            | Decrement ->
-                let state' = state - 1
-                printfn "Counter decremented, the new state is: %i" state'
-                return! innerLoop state'
-        }
-        // We pass the initialState to the first call to innerLoop
-        innerLoop initialState)
-
-// Let's pick an initial value and create the processor
-let processor = createProcessor 10
-
-open FSharp.Control.Reactive
-open System.Threading.Tasks
-open System.Threading
-
-let counter =
-    MailboxProcessor.Start(fun inbox ->
-        let rec loop n =
-            async { do printfn "n = %d, waiting..." n
+    // Holds last value it recieved and maintains a count of how many values received
+    let stackProcessor<'T> = 
+        MailboxProcessor.Start(fun inbox ->
+            let rec loop (latestState:'T option) counter = 
+                async{
                     let! msg = inbox.Receive()
-                    return! loop(n+msg) }
-        loop 0);;
+                    match msg with  
+                    | Send newState -> 
+                        return! loop (Some newState) (counter + 1)
+                    | Get channel -> 
+                        channel.Reply(latestState, counter) 
+                        return! loop latestState counter
+                }
+            loop None 0
+            )
 
-let makeCountingTask (counter:MailboxProcessor<int>) taskId  = async {
-    let name = sprintf "Task%i" taskId
-    for i in [1..3] do
-        counter.Post(i)
-    }
+open StackCounterMailbox
+open System.Threading
+open Spectre.Console
 
 [<EntryPoint>]
 let main argv =
-    Console.WriteLine("Printing")
-    let counter = counter
-    counter.Post(5) 
-    counter.Post(15)
+    let parser = ArgumentParser.Create<CommandArguments>()
+    let results = parser.Parse(inputs = argv, raiseOnUsage = true) 
 
-    let messageExample5 =
-        [1..5]
-            |> List.map (fun i -> makeCountingTask counter i)
-            |> Async.Parallel
-            |> Async.RunSynchronously
-            |> ignore
+    let channelName = results.GetResult Channel_Name
+    let path = results.GetResult Save_Path
 
-    Thread.Sleep(2000);
+    let fromDate = match results.TryGetResult After_Date with
+                   | Some date -> DateTime.Parse date
+                   | None -> DateTime.Parse "12/1/2019 8:30:52 AM"
 
-    //let task1 = stream |> AsyncSeq.mapAsyncParallel id // This runs all our randomWait tasks at once
-    //            |> AsyncSeq.mapAsyncParallel randomwait
-    //            |>AsyncSeq.iterAsyncParallel(fun time ->async{ Console.WriteLine($"printing for time : {time}")})
-    //Async.RunSynchronously task1
+    let isAfterDate vid = match vid.Upload with
+                          | Some value -> value > fromDate;
+                          | _-> false
 
-    //Console.WriteLine("------Second point------")
-    //let task = stream |> AsyncSeq.toObservable |> Observable.bind Observable.ofAsync |> Observable.map randomwait |> Observable.iter (fun time -> printfn "printing for time : %i" time)
+    let stopWatch = System.Diagnostics.Stopwatch.StartNew()
 
-    //Observable.wait task |> ignore
+    let downloader images = ImageDownloading.downloadAllImages images path 
 
-    //let parser = ArgumentParser.Create<CommandArguments>()
-    //let results = parser.Parse(inputs = argv, raiseOnUsage = true) 
-    //let usage = parser.PrintUsage() 
+    let retrievedDataChannel = stackProcessor
+    let downloadedChannel = stackProcessor
 
-    //let channelName = results.GetResult Channel_Name
-    //let path = results.GetResult Save_Path
-
-    //printfn "%s" usage
-    //printfn "%s" path
-    //printfn "%s" channelName
+    let downloadTask = getChannelUploads channelName |> AsyncSeq.map playlistItemToVideoData 
+                        |> AsyncSeq.takeWhile isAfterDate 
+                        |> AsyncSeq.map (fun x-> retrievedDataChannel.Post(Send x) |> ignore; x)
+                        |> downloader 
+                        |> AsyncSeq.iter (fun x-> downloadedChannel.Post(Send x) |> ignore)
 
 
-    //let stopWatch = System.Diagnostics.Stopwatch.StartNew()
-
-    //    // Get id
-    //    // Get iterator for each video
-    //    // Takewhile true
-    //    // Download to path return data
-
-    //let downloader images = downloadAllImages images path 
+    AnsiConsole.WriteLine($"About to start downloading thumbnails from {channelName} to path {path}")
     
-    //let a = getChannelUploads channelName |> AsyncSeq.map playlistItemToVideoData 
-    //        |> AsyncSeq.takeWhile predi 
-    //        |> downloader 
+    let table = Table().HeavyBorder()
+                    .AddColumn("[yellow]Process[/]") 
+                    .AddColumn("[yellow]Current value[/]") 
+                    .AddColumn("[yellow]Count[/]")
+                    .AddRow("Retrieved:","","0")
+                    .AddRow("Downloaded:","","0/0");
 
-    //a |> Async.RunSynchronously
-    //        //|> AsyncSeq.
-    //        //|> downloadAllImages
 
+    
+    let mutable a = AnsiConsole.Live(table)
+    a.AutoClear <- true
+    a.Overflow <- VerticalOverflow.Ellipsis
+    a.Cropping <- VerticalOverflowCropping.Top
+    let a = a.StartAsync((fun ctx -> 
+        task{
+            let startedDownloadTask = downloadTask |> Async.StartAsTask
+
+            let timeSpan = TimeSpan.FromMilliseconds(100)
+            let periodicTimer = new PeriodicTimer(timeSpan)
+
+            while not (startedDownloadTask.IsCompleted) do 
+                let retrievedData,retrievedCount = retrievedDataChannel.PostAndReply(fun rc -> Get rc)
+                let downloadedData,dretrievedCount = downloadedChannel.PostAndReply(fun rc -> Get rc)
+
+                do match retrievedData with 
+                   | Some value -> table.UpdateCell(0,1,value.ToString()).UpdateCell(0,2,retrievedCount.ToString()) |> ignore
+                   | _-> ()          
+                                   
+                do match downloadedData with 
+                   | Some value -> table.UpdateCell(1,1,value.ToString())
+                                        .UpdateCell(1,2,$"{dretrievedCount}/{retrievedCount}") |> ignore
+                   | _-> ()     
+                                       
+                ctx.Refresh()
+                do! periodicTimer.WaitForNextTickAsync().AsTask() |> Async.AwaitTask |> Async.Ignore
+            
+            ctx.Refresh()
+
+        }))
+
+    a |> Async.AwaitTask |> Async.RunSynchronously
+
+   
     //printfn "%f" stopWatch.Elapsed.TotalMilliseconds
 
     0
