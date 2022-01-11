@@ -6,9 +6,6 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<Content Include="google-api-key.txt">
-			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
-		</Content>
 		<Compile Include="Program.fs" />
 	</ItemGroup>
 

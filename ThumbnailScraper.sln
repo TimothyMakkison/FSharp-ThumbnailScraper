@@ -5,10 +5,6 @@ VisualStudioVersion = 17.0.31912.275
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "ThumbnailScraper", "ThumbnailScraper\ThumbnailScraper.fsproj", "{50F32292-F98A-4C9A-89B0-E11A4BD8FD2E}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Test MailProcessor", "Test MailProcessor\Test MailProcessor.fsproj", "{55CD203D-D408-4F7C-A33B-E265620E5848}"
-EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Test Spectre", "Test Spectre\Test Spectre.fsproj", "{33B31413-56D7-4051-8BBE-7563AD1D15D7}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -19,14 +15,6 @@ Global
 		{50F32292-F98A-4C9A-89B0-E11A4BD8FD2E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{50F32292-F98A-4C9A-89B0-E11A4BD8FD2E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{50F32292-F98A-4C9A-89B0-E11A4BD8FD2E}.Release|Any CPU.Build.0 = Release|Any CPU
-		{55CD203D-D408-4F7C-A33B-E265620E5848}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{55CD203D-D408-4F7C-A33B-E265620E5848}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{55CD203D-D408-4F7C-A33B-E265620E5848}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{55CD203D-D408-4F7C-A33B-E265620E5848}.Release|Any CPU.Build.0 = Release|Any CPU
-		{33B31413-56D7-4051-8BBE-7563AD1D15D7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{33B31413-56D7-4051-8BBE-7563AD1D15D7}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{33B31413-56D7-4051-8BBE-7563AD1D15D7}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{33B31413-56D7-4051-8BBE-7563AD1D15D7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
