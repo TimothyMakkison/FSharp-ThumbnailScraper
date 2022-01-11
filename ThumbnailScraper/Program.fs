@@ -8,21 +8,37 @@ open Argu
 open Spectre.Console
 open System.Threading.Tasks
 
-let apiKey = File.ReadAllText("./google-api-key.txt")
+module CommandArguments = 
+    type DownloadersArgs = 
+            |[<Mandatory>] Save_Path of path:string
+            |[<Mandatory>] Channel_Name of channel:string
+            |[<Mandatory>] Api_Key of api_key:string 
+            | After_Date of from_date:string 
+            | [<AltCommandLine("-s")>] Sample
 
-type CommandArguments = 
-        |[<Mandatory>] Save_Path of path:string
-        |[<Mandatory>] Channel_Name of channel:string
-        | Api_Key of api_key:string 
-        | After_Date of from_date:string 
+            interface IArgParserTemplate with
+                  member s.Usage =
+                      match s with
+                      | Save_Path _ -> "specify the save location."
+                      | Channel_Name _ -> "specify the youtube channel to scrape."
+                      | After_Date _ -> "specify the date from which uploads will be collected."
+                      | Api_Key _ -> "specify the google api key."
+                      | Sample _ -> "print a selection of downloaded images."
 
-        interface IArgParserTemplate with
-              member s.Usage =
-                  match s with
-                  | Save_Path _ -> "specify the save location."
-                  | Channel_Name _ -> "specify the youtube channel to scrape."
-                  | After_Date _ -> "specify the date from which uploads will be collected."
-                  | Api_Key _ -> "specify the google api key."
+    let parseArgs arg = 
+        let parser = ArgumentParser.Create<DownloadersArgs>()
+        let results = parser.Parse(inputs = arg, raiseOnUsage = true) 
+        
+        let channelName = results.GetResult Channel_Name
+        let path = results.GetResult Save_Path
+        let apiKey = results.GetResult Api_Key
+        
+        let printSamples = match results.TryGetResult Sample with 
+                            | Some Sample -> true
+                            | _ -> false
+    
+        let fromDate = results.GetResult(After_Date, defaultValue = "12/1/2000 9:00:00 AM") |> DateTime.Parse 
+        (channelName, path, apiKey, fromDate, printSamples)
 
 type VideoData = {Title:string; Url:string; Upload: DateTime option}
 
@@ -34,7 +50,8 @@ module ImageDownloading =
         uri.GetLeftPart(UriPartial.Path) |> Path.GetExtension
     
     let createPath folder title url = 
-        let fileName = Regex.Replace(title, @"[\\/:*?""<>|]", "")
+        // Remove any illegal file names or characters that a
+        let fileName = Regex.Replace(title, @"[\\/:*?""<>|\[\]]", "")
         let fileExtension = getFileExtension url
         Path.Combine(folder, $"{fileName}{fileExtension}")
     
@@ -98,7 +115,7 @@ module YoutubeCallers =
         return playlistId
     }
 
-    let getIdAndService channelName = async {
+    let getIdAndService channelName apiKey= async {
         //Create service and get channel id
         let baseClient = new BaseClientService.Initializer(ApiKey = apiKey, ApplicationName = "ThumbnailDownloader") 
         let service = new YouTubeService(baseClient)
@@ -126,127 +143,128 @@ module StackCounterMailbox=
             )
 
 open StackCounterMailbox
+open System.Diagnostics
+
+module ConsoleWriter = 
+    let createProgressTable = 
+        let table = Table().HeavyBorder()
+                        .AddColumn("[bold #f1fa8c]Process[/]") 
+                        .AddColumn("[bold #f1fa8c]Title[/]") 
+                        .AddColumn("[bold #f1fa8c]Upload[/]") 
+                        .AddColumn("[bold #f1fa8c]Count[/]")
+                        .AddRow("Most recently retrieved:","","","0")
+                        .AddRow("Most recently downloaded:","","","0/0");
+
+        table.Columns[1].Width <- 50
+        table.Columns[2].Width <- 15
+        table
+
+    let printProgressAsync (downloadTask:Task) (retrievedDataChannel: MailboxProcessor<StackProcessorMessage<_>>) (downloadedChannel:MailboxProcessor<StackProcessorMessage<_>>) = 
+        let table = createProgressTable
+
+        let progressTask = AnsiConsole.Live(table).StartAsync((fun ctx -> 
+            task{
+                let timeSpan = TimeSpan.FromMilliseconds(100)
+
+                let rec loop () = async{
+                    do! Task.Delay(timeSpan)|> Async.AwaitTask |> Async.Ignore
+
+                    let retrievedData, retrievedCount = retrievedDataChannel.PostAndReply(fun rc -> Get rc)
+                    let downloadedData, downloadedCount = downloadedChannel.PostAndReply(fun rc -> Get rc)
+
+                    let printUpload (date: DateTime option) = 
+                        match date with 
+                        | Some date -> date.ToString("dd/M/yyyy")
+                        | None -> "N/A"
+                       
+                    do match retrievedData with 
+                        | Some videoData -> 
+                            Debug.WriteLine($"{videoData}")
+                            table.UpdateCell(0,1,$"{videoData.Title}")
+                                .UpdateCell(0,2,$"{printUpload videoData.Upload}")
+                                .UpdateCell(0,3,$"{retrievedCount}") |> ignore
+                        | _-> ()          
+                                      
+                    do match downloadedData with 
+                        | Some (videoData,_) -> 
+                            Debug.WriteLine($"{videoData}")
+                            table.UpdateCell(1,1,$"{videoData.Title}")
+                                .UpdateCell(1,2,$"{printUpload videoData.Upload}")
+                                .UpdateCell(1,3,$"{downloadedCount}/{retrievedCount}") |> ignore
+                        | _-> ()     
+                                          
+                    ctx.Refresh()
+
+                    if not downloadTask.IsCompleted then
+                        do! loop () 
+                    else 
+                        ()
+                }
+
+                do! loop ()
+            }))
+        progressTask
+
+    let getMiddleImage (collection: _ list) =
+        let midpoint = collection.Length/2
+        let _, (path:string) = collection[midpoint]
+        CanvasImage(path)
+
+    let printSampleGrid data =
+        let paths = data |> List.splitInto 4 |> List.map getMiddleImage
+        let sampleGrid = Grid().AddColumns(2).AddRow(paths[0],paths[1]).AddRow(paths[2],paths[3])
+        AnsiConsole.Write(sampleGrid)
 
 let playlistItemToVideoData (item:Data.PlaylistItem ) =
     let nullUpload = item.Snippet.PublishedAt
     let upload = if nullUpload.HasValue then Some nullUpload.Value else None
-    {Title=item.Snippet.Title; Url=item.Snippet.Thumbnails.Default__.Url; Upload= upload}
+    {Title=item.Snippet.Title.EscapeMarkup(); Url=item.Snippet.Thumbnails.Default__.Url; Upload= upload}
 
-let parseArgs arg = 
-    let parser = ArgumentParser.Create<CommandArguments>()
-    let results = parser.Parse(inputs = arg, raiseOnUsage = true) 
-    
-    let channelName = results.GetResult Channel_Name
-    let path = results.GetResult Save_Path
-    //let apiKey = results.GetResult Api_Key
-    
-    let fromDate = results.GetResult(After_Date, defaultValue = "12/1/2000 9:00:00 AM") |> DateTime.Parse 
-    (channelName, path, fromDate)
-
-
-let createProgressTable = 
-    let table = Table().HeavyBorder()
-                    .AddColumn("[bold #f1fa8c]Process[/]") 
-                    .AddColumn("[bold #f1fa8c]Title[/]") 
-                    .AddColumn("[bold #f1fa8c]Upload[/]") 
-                    .AddColumn("[bold #f1fa8c]Count[/]")
-                    .AddRow("Most recently retrieved:","","","0")
-                    .AddRow("Most recently downloaded:","","","0/0");
-
-    table.Columns[1].Width <- 50
-    table.Columns[2].Width <- 15
-    table
-
-let progressTask (downloadTask:Task) (retrievedDataChannel: MailboxProcessor<StackProcessorMessage<VideoData>>) (downloadedChannel:MailboxProcessor<StackProcessorMessage<VideoData * string>>) = 
-    let table = createProgressTable
-
-    let progressTask = AnsiConsole.Live(table).StartAsync((fun ctx -> 
-        task{
-            let timeSpan = TimeSpan.FromMilliseconds(100)
-
-            let rec loop () = async{
-                do! Task.Delay(timeSpan)|> Async.AwaitTask |> Async.Ignore
-
-                let retrievedData, retrievedCount = retrievedDataChannel.PostAndReply(fun rc -> Get rc)
-                let downloadedData, downloadedCount = downloadedChannel.PostAndReply(fun rc -> Get rc)
-
-                let printUpload (date: DateTime option) = 
-                    match date with 
-                    | Some date -> date.ToString("dd/M/yyyy")
-                    | None -> "N/A"
-                       
-                do match retrievedData with 
-                    | Some videoData -> 
-                        table.UpdateCell(0,1,$"{videoData.Title}")
-                            .UpdateCell(0,2,$"{printUpload videoData.Upload}")
-                            .UpdateCell(0,3,$"{retrievedCount}") |> ignore
-                    | _-> ()          
-                                      
-                do match downloadedData with 
-                    | Some (videoData,savePath) -> 
-                        table.UpdateCell(1,1,$"{videoData.Title}")
-                            .UpdateCell(1,2,$"{printUpload videoData.Upload}")
-                            .UpdateCell(1,3,$"{downloadedCount}/{retrievedCount}") |> ignore
-                    | _-> ()     
-                                          
-                ctx.Refresh()
-
-                if not downloadTask.IsCompleted then
-                    loop () |> Async.RunSynchronously
-                else 
-                    ()
-            }
-
-            loop () |> Async.RunSynchronously
-        }))
-    progressTask
+open ConsoleWriter
+open CommandArguments
 
 [<EntryPoint>]
 let main argv =
-    let channelName, path, fromDate = parseArgs argv
+    try 
+        let channelName, path, apiKey, fromDate, printSamples = parseArgs argv
 
-    let stopWatch = System.Diagnostics.Stopwatch.StartNew()
+        let stopWatch = System.Diagnostics.Stopwatch.StartNew()
 
-    let service, channelId = YoutubeCallers.getIdAndService channelName |> Async.RunSynchronously
+        AnsiConsole.MarkupLine($"Downloading thumbnails from [bold #8be9fd]{channelName.EscapeMarkup()}[/] to path [bold #bd93f9]{path}[/]")
+        let service, channelId = YoutubeCallers.getIdAndService channelName apiKey |> Async.RunSynchronously
 
-    AnsiConsole.MarkupLine($"Retrieved channel id [bold #ff79c6]{channelId}[/] for [bold #8be9fd]{channelName}[/]")
-    AnsiConsole.MarkupLine($"Downloading [bold white]thumbnails[/] from [bold #8be9fd]{channelName}[/] to path [bold #bd93f9]{path}[/]")
-    AnsiConsole.WriteLine()
+        AnsiConsole.MarkupLine($"Retrieved channel id [bold #ff79c6]{channelId}[/] for channel [bold #8be9fd]{channelName}[/]")
+        AnsiConsole.WriteLine()
 
-    let retrievedDataChannel = stackProcessor
-    let downloadedChannel = stackProcessor
+        let retrievedDataChannel = stackProcessor
+        let downloadedChannel = stackProcessor
 
-    let isAfterDate vid = match vid.Upload with
-                          | Some value -> value > fromDate;
-                          | _-> false
-    
-    let downloadTask =  (service, channelId) ||> YoutubeCallers.getAllVideoPages 
-                        |> AsyncSeq.map playlistItemToVideoData 
-                        |> AsyncSeq.takeWhile isAfterDate 
-                        |> AsyncSeq.map (fun x-> retrievedDataChannel.Post(Send x) |> ignore; x)
-                        |> (fun images -> ImageDownloading.downloadAllImages images path) 
-                        |> AsyncSeq.map (fun x-> downloadedChannel.Post(Send x) |> ignore; x)
-                        |> AsyncSeq.toListAsync
+        let isAfterDate vid = match vid.Upload with
+                              | Some value -> value > fromDate;
+                              | _-> false
+        
+        let downloadTask =  (service, channelId) ||> YoutubeCallers.getAllVideoPages 
+                            |> AsyncSeq.map playlistItemToVideoData 
+                            |> AsyncSeq.takeWhile isAfterDate 
+                            |> AsyncSeq.map (fun x-> retrievedDataChannel.Post(Send x) |> ignore; x)
+                            |> (fun images -> ImageDownloading.downloadAllImages images path) 
+                            |> AsyncSeq.map (fun x-> downloadedChannel.Post(Send x) |> ignore; x)
+                            |> AsyncSeq.toListAsync
+                            |> Async.StartAsTask
 
-    let startedDownloadTask = downloadTask |> Async.StartAsTask
-    let progress = progressTask startedDownloadTask retrievedDataChannel downloadedChannel
+        let printProgressTask = printProgressAsync downloadTask retrievedDataChannel downloadedChannel
 
-    let result = startedDownloadTask |> Async.AwaitTask |> Async.RunSynchronously
-    progress |> Async.AwaitTask |> Async.RunSynchronously
-    let _, downloadedCount = downloadedChannel.PostAndReply(fun rc -> Get rc)
-    
-    AnsiConsole.MarkupLine($"Downloaded [bold #ff5555]{downloadedCount}[/] items from [bold #8be9fd]{channelName}[/] "
-    + $"to path [bold #bd93f9]{path}[/] in [bold white]{(int)stopWatch.Elapsed.TotalMilliseconds}ms[/]")
-    
+        let result = downloadTask |> Async.AwaitTask |> Async.RunSynchronously
+        printProgressTask |> Async.AwaitTask |> Async.RunSynchronously
+        let _, downloadedCount = downloadedChannel.PostAndReply(fun rc -> Get rc)
+
+        if printSamples then 
+            printSampleGrid result
+
+        AnsiConsole.MarkupLine($"Downloaded [bold #ff5555]{downloadedCount}[/] items from [bold #8be9fd]{channelName}[/] "
+        + $"to path [bold #bd93f9]{path}[/] in [bold white]{(int)stopWatch.Elapsed.TotalMilliseconds}ms[/]") 
+        
+    with e -> 
+        AnsiConsole.MarkupLine($"[bold #ff5555]Error occured[/]\r\n[bold #ffb86c]{e.Message}[/]\r\n[bold #f1fa8c]{e.StackTrace.EscapeMarkup()}[/]")
+        raise e
     0
-
-// Tasks:
-// ✓ move into modules
-// ✓ get channel id and then do pagiantion
-// ✓ update colors
-// ✓ add columns
-// add image display
-// ✓ print elapsed time
-// ✓ take api key from args
-// wrap in try catch
-// move prorgress into separate function
