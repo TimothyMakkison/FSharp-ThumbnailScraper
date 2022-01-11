@@ -50,8 +50,7 @@ module ImageDownloading =
         uri.GetLeftPart(UriPartial.Path) |> Path.GetExtension
     
     let createPath folder title url = 
-        // Remove any illegal file names or characters that a
-        let fileName = Regex.Replace(title, @"[\\/:*?""<>|\[\]]", "")
+        let fileName = Regex.Replace(title, @"[\\/:*?""<>|]", "")
         let fileExtension = getFileExtension url
         Path.Combine(folder, $"{fileName}{fileExtension}")
     
@@ -116,7 +115,6 @@ module YoutubeCallers =
     }
 
     let getIdAndService channelName apiKey= async {
-        //Create service and get channel id
         let baseClient = new BaseClientService.Initializer(ApiKey = apiKey, ApplicationName = "ThumbnailDownloader") 
         let service = new YouTubeService(baseClient)
 
