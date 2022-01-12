@@ -27,7 +27,7 @@ module CommandArguments =
 
     let parseArgs arg = 
         let parser = ArgumentParser.Create<DownloadersArgs>()
-        let results = parser.Parse(inputs = arg, raiseOnUsage = true) 
+        let results = parser.Parse(inputs = arg) 
         
         let channelName = results.GetResult Channel_Name
         let path = results.GetResult Save_Path
@@ -209,8 +209,9 @@ module ConsoleWriter =
         CanvasImage(path)
 
     let printSampleGrid data =
-        let paths = data |> List.splitInto 4 |> List.map getMiddleImage
-        let sampleGrid = Grid().AddColumns(2).AddRow(paths[0],paths[1]).AddRow(paths[2],paths[3])
+        let images = data |> List.splitInto 3
+                    |> List.map getMiddleImage
+        let sampleGrid = Grid().AddColumns(3).AddRow(images[0],images[1],images[2])
         AnsiConsole.Write(sampleGrid)
 
 let playlistItemToVideoData (item:Data.PlaylistItem ) =
@@ -263,6 +264,6 @@ let main argv =
         + $"to path [bold #bd93f9]{path}[/] in [bold white]{(int)stopWatch.Elapsed.TotalMilliseconds}ms[/]") 
         
     with e -> 
-        AnsiConsole.MarkupLine($"[bold #ff5555]Error occured[/]\r\n[bold #ffb86c]{e.Message}[/]\r\n[bold #f1fa8c]{e.StackTrace.EscapeMarkup()}[/]")
+        AnsiConsole.MarkupLine($"[bold #ff5555]Error occured[/]\r\n[bold #ffb86c]{e.Message.EscapeMarkup()}[/]\r\n[bold #f1fa8c]{e.StackTrace.EscapeMarkup()}[/]")
         raise e
     0
