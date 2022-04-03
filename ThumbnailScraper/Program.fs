@@ -116,6 +116,8 @@ let getIdAndService channelName apiKey =
     }
 
     async {
+        //Create service and get channel id
+        //Create service and get channel id
         let baseClient = new BaseClientService.Initializer(ApiKey = apiKey, ApplicationName = "ThumbnailDownloader") 
         let service = new YouTubeService(baseClient)
 
